@@ -1,0 +1,11 @@
+%% This is the application resource file (.app file) for the,
+%% application.
+{application, odoric,
+  [{description, "Your Desc HERE"},
+   {vsn, "0.1.0"},
+   {modules, [odoric_app,
+              odoric_sup]},
+   {registered,[odoric_sup]},
+   {applications, [kernel, stdlib]},
+   {mod, {odoric_app,[]}},
+   {start_phases, []}]}.
