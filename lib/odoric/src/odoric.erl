@@ -67,7 +67,7 @@ main(Args) ->
             end;
         Other ->
             io:format("Other: ~p\n", [Other]),
-            io:format("Usage: nodetool {ping|stop|restart|reboot}\n")
+            io:format("Usage: odoric {ping|stop|restart|reboot}\n")
     end,
     net_kernel:stop().
 
@@ -78,7 +78,7 @@ main(Args) ->
 process_args([], Acc, TargetNode) ->
     {lists:reverse(Acc), TargetNode};
 process_args(["help" | _Rest], _Acc, _TargetNode) ->
-    io:format("Usage: nodetool {ping|stop|restart|reboot}\n"),
+    io:format("Usage: odoric {ping|stop|restart|reboot}\n"),
     {[], undefined};
 process_args(["-setcookie", Cookie | Rest], Acc, TargetNode) ->
     erlang:set_cookie(node(), list_to_atom(Cookie)),
