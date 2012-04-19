@@ -17,35 +17,66 @@
 %%--------------------------------------------------------------------
 main(Args) ->
     ok = start_epmd(),
-    %% Extract the args
-    {RestArgs, TargetNode} = case process_args(Args, [], undefined) of
-                                 {[], undefined} ->
-                                     halt(0);
-                                 Result ->
-                                     Result
-                             end,
 
-    %% See if the node is currently running  -- if it's not, we'll bail
-    case {net_kernel:hidden_connect_node(TargetNode), net_adm:ping(TargetNode)} of
-        {true, pong} ->
-            ok;
-        {_, pang} ->
-            io:format("Node ~p not responding to pings.\n", [TargetNode]),
-            halt(1)
+    %% Extract the args
+    {ok, {Options, _RestArgs}} = getopt:parse(opt_spec_list(), Args),
+    TargetNode = case lists:keyfind('sname', 1, Options) of
+                     false ->
+                         none;
+                     undefined ->
+                         TN = proplists:get_value('name', Options),
+                         ThisNode = append_node_suffix(TN, "_maint_"),
+                         {ok, _} = net_kernel:start([ThisNode, longnames]),
+                         nodename(TN);
+                     {sname, TN} ->
+                         io:format("NAME ~p~n", [TN]),
+                         ThisNode = append_node_suffix(TN, "_maint_"),
+                         {ok, _} = net_kernel:start([ThisNode, shortnames]),
+                         nodename(TN)
+                 end,
+
+    case lists:keyfind(cookie, 1, Options) of
+        {cookie, Cookie} ->
+            erlang:set_cookie(node(), Cookie);
+        false ->
+            nothing
     end,
 
-    case RestArgs of
-        ["ping"] ->
+    case TargetNode of
+        none ->
+            do_nothing;
+        _ ->
+            %% See if the node is currently running  -- if it's not, we'll bail    
+            case {net_kernel:hidden_connect_node(TargetNode), net_adm:ping(TargetNode)} of
+                {true, pong} ->
+                    ok;
+                {_, pang} ->
+                    io:format("Node ~p not responding to pings.\n", [TargetNode]),
+                    halt(1)
+            end
+    end,
+
+    case lists:keyfind(action, 1, Options) of
+        {action, "deploy"} ->
+            start_erlcloud(),
+            {url, Url} = lists:keyfind(url, 1, Options),
+            Artifacts = odoric_builder:build(Url),
+            odoric_uploader:upload(s3, "sqs_worker", Artifacts),
+            ok;
+        {action, "ping"} ->
             %% If we got this far, the node already responsed to a ping, so just dump
             %% a "pong"
             io:format("pong\n");
-        ["stop"] ->
+        {action, "stop"} ->
             io:format("~p\n", [rpc:call(TargetNode, init, stop, [], 60000)]);
-        ["restart"] ->
+        {action, "restart"} ->
             io:format("~p\n", [rpc:call(TargetNode, init, restart, [], 60000)]);
-        ["reboot"] ->
+        {action, "reboot"} ->
             io:format("~p\n", [rpc:call(TargetNode, init, reboot, [], 60000)]);
-        ["rpc", Module, Function | RpcArgs] ->
+        {action, "rpc"} ->
+            {module, Module} = lists:keyfind(module, 1, Options),
+            {function, Function} = lists:keyfind(function, 1, Options),
+            {args, RpcArgs} = lists:keyfind(args, 1, Options),
             case rpc:call(TargetNode, list_to_atom(Module), list_to_atom(Function),
                           [RpcArgs], 60000) of
                 ok ->
@@ -56,7 +87,10 @@ main(Args) ->
                 _ ->
                     halt(1)
             end;
-        ["rpcterms", Module, Function, ArgsAsString] ->
+        {action, "rpcterms"} ->
+            {module, Module} = lists:keyfind(module, 1, Options),
+            {function, Function} = lists:keyfind(function, 1, Options),
+            {args, ArgsAsString} = lists:keyfind(args, 1, Options),
             case rpc:call(TargetNode, list_to_atom(Module), list_to_atom(Function),
                           consult(ArgsAsString), 60000) of
                 {badrpc, Reason} ->
@@ -64,10 +98,7 @@ main(Args) ->
                     halt(1);
                 Other ->
                     io:format("~p\n", [Other])
-            end;
-        Other ->
-            io:format("Other: ~p\n", [Other]),
-            io:format("Usage: odoric {ping|stop|restart|reboot}\n")
+            end
     end,
     net_kernel:stop().
 
@@ -75,25 +106,14 @@ main(Args) ->
 %%% Internal functions
 %%%===================================================================
 
-process_args([], Acc, TargetNode) ->
-    {lists:reverse(Acc), TargetNode};
-process_args(["help" | _Rest], _Acc, _TargetNode) ->
-    io:format("Usage: odoric {ping|stop|restart|reboot}\n"),
-    {[], undefined};
-process_args(["-setcookie", Cookie | Rest], Acc, TargetNode) ->
-    erlang:set_cookie(node(), list_to_atom(Cookie)),
-    process_args(Rest, Acc, TargetNode);
-process_args(["-name", TargetName | Rest], Acc, _) ->
-    ThisNode = append_node_suffix(TargetName, "_maint_"),
-    {ok, _} = net_kernel:start([ThisNode, longnames]),
-    process_args(Rest, Acc, nodename(TargetName));
-process_args(["-sname", TargetName | Rest], Acc, _) ->
-    ThisNode = append_node_suffix(TargetName, "_maint_"),
-    {ok, _} = net_kernel:start([ThisNode, shortnames]),
-    process_args(Rest, Acc, nodename(TargetName));
-process_args([Arg | Rest], Acc, Opts) ->
-    process_args(Rest, [Arg | Acc], Opts).
-
+start_erlcloud() ->
+    ok = application:start(sasl),
+    ok = application:start(crypto),
+    ok = application:start(public_key),
+    ok = application:start(ssl),
+    ok = application:start(inets),
+    ok = application:start(xmerl),
+    ok = application:start(erlcloud).
 
 start_epmd() ->
     [] = os:cmd(epmd_path() ++ " -daemon"),
@@ -115,7 +135,6 @@ epmd_path() ->
             Epmd
     end.
 
-
 nodename(Name) ->
     case string:tokens(Name, "@") of
         [_Node, _Host] ->
@@ -132,7 +151,6 @@ append_node_suffix(Name, Suffix) ->
         [Node] ->
             list_to_atom(lists:concat([Node, Suffix, os:getpid()]))
     end.
-
 
 %%
 %% Given a string or binary, parse it into a list of terms, ala file:consult/0
@@ -157,3 +175,15 @@ consult(Cont, Str, Acc) ->
         {more, Cont1} ->
             consult(Cont1, eof, Acc)
     end.
+
+opt_spec_list() ->
+    [
+     {cookie,      $c, "set-cookie", atom,   "Cookie"},
+     {name,        $s, "name",       string, "Short node name"},
+     {sname,       $s, "sname",      string, "Long node name"},
+     {url,        $u, "url",       string, "Url of git repo"},
+     {action,      undefined, undefined,     string, "Action"},
+     {module,      undefined, undefined,     string, "odule to call function of"},
+     {function,      undefined, undefined,     string, "Function to call"},
+     {args,      undefined, undefined,     string, "Args to pass function"}
+    ].

@@ -6,6 +6,6 @@
    {modules, [odoric_app,
               odoric_sup]},
    {registered,[odoric_sup]},
-   {applications, [kernel, stdlib]},
+   {applications, [kernel, stdlib, getopt, erlcloud]},
    {mod, {odoric_app,[]}},
    {start_phases, []}]}.
