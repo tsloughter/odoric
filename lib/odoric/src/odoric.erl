@@ -61,7 +61,7 @@ main(Args) ->
             start_erlcloud(),
             {url, Url} = lists:keyfind(url, 1, Options),
             Artifacts = odoric_builder:build(Url),
-            odoric_uploader:upload(s3, "sqs_worker", Artifacts),
+            odoric_uploader:upload(s3, Artifacts),
             ok;
         {action, "ping"} ->
             %% If we got this far, the node already responsed to a ping, so just dump

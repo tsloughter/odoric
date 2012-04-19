@@ -8,7 +8,11 @@
 -module(odoric_uploader).
 
 %% API
--export([upload/3]).
+-export([upload/2,
+         upload/3]).
+
+upload(s3, Artifacts) -> 
+    upload(s3, "erlang_target_systems", Artifacts).
 
 upload(s3, Bucket, Artifacts) ->
     AwsCreds = get_aws_creds(),
